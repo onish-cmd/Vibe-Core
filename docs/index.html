@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vibe-Core | UAPI Documentation</title>
+    <style>
+        :root {
+            --bg: #1a1b26; --fg: #a9b1d6; --accent: #7aa2f7;
+            --path: #9ece6a; --code-bg: #24283b; --warn: #f7768e;
+        }
+        body {
+            font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+            background-color: var(--bg); color: var(--fg);
+            line-height: 1.6; max-width: 900px; margin: 40px auto; padding: 0 20px;
+        }
+        h1, h2, h3 { color: var(--accent); border-bottom: 1px solid var(--code-bg); padding-bottom: 8px; }
+        code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; color: var(--path); font-family: 'JetBrains Mono', monospace; }
+        pre { background: var(--code-bg); padding: 18px; border-radius: 8px; overflow-x: auto; border: 1px solid #414868; position: relative; }
+        .endpoint { margin-bottom: 40px; padding: 20px; background: rgba(36, 40, 59, 0.5); border-radius: 12px; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; background: var(--code-bg); border-radius: 8px; overflow: hidden; }
+        th, td { text-align: left; padding: 15px; border-bottom: 1px solid #414868; }
+        th { background: rgba(122, 162, 247, 0.1); color: var(--accent); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
+        .badge { background: var(--accent); color: var(--bg); padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 800; vertical-align: middle; }
+        .warn-text { color: var(--warn); font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Vibe-Core <span class="badge">v1.1.0</span></h1>
+    <p>An ultra-low latency, file-based audio engine for Linux. Designed for <strong>FOSSHack 2026</strong> with a focus on minimal resource overhead and Unix-style IPC.</p>
+
+    <h2>The UAPI Architecture</h2>
+    <p>Vibe-Core operates as a headless daemon. Interaction occurs through <strong>Memory-Mapped Control Nodes</strong> in <code>/dev/shm/vibe</code>. This allows any language (Bash, Python, C) to control the engine by simply performing standard File I/O. The wrapper or user can find symlinks to <code>/dev/shm/vibe(file)</code> in the local directory.</p>
+
+    <h2>Control Endpoints (Write-Only)</h2>
+
+    <div class="endpoint">
+        <h3>1. Command Pipe (<code>ctl</code>)</h3>
+        <p>A <strong>FIFO Named Pipe</strong> for real-time engine instructions.</p>
+        <pre>echo "next" > ctl    # Skip current track
+echo "prev" > ctl    # Previous track (Index - 2 logic)
+echo "pause" > ctl   # Suspend audio device
+echo "resume" > ctl  # Resume audio device</pre>
+    </div>
+
+    <div class="endpoint">
+        <h3>2. Volume Node (<code>vol</code>)</h3>
+        <p>Text-based gain control. Supports software amplification.</p>
+        <ul>
+            <li><code>0 - 100</code>: Standard attenuation.</li>
+            <li><code>101 - 200</code>: <span class="warn-text">Boost Mode</span> (Digital gain beyond unity).</li>
+        </ul>
+        <pre>echo "125" > vol      # 25% Software Boost</pre>
+    </div>
+
+    <div class="endpoint">
+        <h3>3. Priority Injection (<code>play_now</code>)</h3>
+        <p><strong>Interrupt Handler:</strong> Passing an absolute path here immediately halts the current playlist, plays the target file, and then <span style="color: var(--path)">restores the previous playlist state</span>.</p>
+        <pre>echo "/home/user/music/urgent_vibe.mp3" > play_now</pre>
+    </div>
+
+    <h2>Telemetry Nodes (Read-Only)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Node</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th>Data Format</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>state</code></td>
+                <td>Engine playback status</td>
+                <td>File</td>
+                <td><code>playing</code> | <code>paused</code></td>
+            </tr>
+            <tr>
+                <td><code>now_playing</code></td>
+                <td>Metadata of active stream</td>
+                <td>File</td>
+                <td>String (Filename)</td>
+            </tr>
+            <tr>
+                <td><code>head</code></td>
+                <td>High-precision playback timer</td>
+                <td>File</td>
+                <td>Float (Seconds)</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2>Performance Statistics</h2>
+    <div class="endpoint">
+        <p>Testing performed on <strong>AMD E-350 (1.6GHz)</strong> running Arch Linux:</p>
+        <ul>
+            <li><strong>CPU Usage:</strong> ~2.1% (Stable)</li>
+            <li><strong>RAM Footprint:</strong> Minimal</li>
+            <li><strong>I/O Latency:</strong> Near-zero (RAM-backed via <code>/dev/shm</code>)</li>
+        </ul>
+    </div>
+
+    <footer style="margin-top: 60px; padding: 20px; border-top: 1px solid var(--code-bg); font-size: 0.8rem; opacity: 0.5;">
+        Built for FOSSHack 2026 | Licensed under the Unlicense
+    </footer>
+</body>
+</html>
