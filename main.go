@@ -24,6 +24,7 @@ var (
 	mu             sync.Mutex
 	volume         float32 = 0.5
 	device         *malgo.Device
+	decoder        *mp3.Decoder
 	playlist       []string
 	index          = 0
 	skip           = make(chan bool)
@@ -62,6 +63,37 @@ func watchPlayNow() {
 		}
 		f.Close()
 	}
+}
+
+func watchSeek() {
+    for {
+        // Blocks here until someone echoes to the pipe
+        f, err := os.OpenFile("seek", os.O_RDONLY, 0)
+        if err != nil {
+            continue 
+        }
+        
+        scanner := bufio.NewScanner(f)
+        for scanner.Scan() {
+            input := strings.TrimSpace(scanner.Text())
+            if sec, err := strconv.ParseFloat(input, 64); err == nil {
+                bytePos := int64(sec * sampleRate * 4)
+
+                mu.Lock()
+                // Seek the underlying PCM stream
+                _, err := decoder.Seek(bytePos, io.SeekStart)
+                if err == nil {
+                    // Flush the buffer
+                    for len(audioBuffer) > 0 {
+                        <-audioBuffer
+                    }
+                    currentElapsed = sec
+                }
+                mu.Unlock()
+            }
+        }
+        f.Close()
+    }
 }
 
 func onSamples(pOutput, pInput []byte, frameCount uint32) {
@@ -230,6 +262,7 @@ func main() {
 	go watchVolume()
 	go watchCtl()
 	go watchPlayNow()
+	go watchSeek()
 
 	for {
 		playNext(ctx)
@@ -240,13 +273,13 @@ func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
 
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
 
 		// Setup the actual RAM-backed nodes
-		if node == "ctl" || node == "play_now" {
+		if node == "ctl" || node == "play_now" || node == "seek" {
 			os.Remove(fullShmPath)
 			syscall.Mkfifo(fullShmPath, 0o666)
 		} else if node == "vol" {
