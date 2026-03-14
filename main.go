@@ -193,6 +193,7 @@ func playNext(ctx *malgo.AllocatedContext) {
 		index = (index + 1) % len(playlist)
 		return
 	}
+	decode = d
 
 	sRate := uint32(d.SampleRate())
 	sampleRate = float64(sRate)
