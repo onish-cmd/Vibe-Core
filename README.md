@@ -9,12 +9,19 @@ An ultra-lightweight, sample-accurate audio engine written in Go. Vibe-Core foll
 - **Sample-Accurate Telemetry:** High-precision playback tracking via `/dev/shm/vibe/head`.
 - **Digital Boost:** Software-level gain up to 200%.
 
-## Architecture
-Vibe-Core creates a virtual filesystem interface. 
-- `ctl`: Control pipe (next, prev, pause, resume).
-- `vol`: Gain control (0-200).
-- `play_now`: Priority interrupt for specific file paths.
-- `head`: Live playback timer.
+## UAPI Reference
+
+Vibe-Core exposes interaction nodes via memory-backed files in `/dev/shm/vibe/`.
+
+| Node | Mode | Description |
+| :--- | :--- | :--- |
+| `ctl` | W/O | **Command Pipe:** Real-time instructions (`next`, `prev`, `pause`, `resume`). |
+| `seek` | W/O | **Seek Control:** Atomic jump to a timestamp in seconds (e.g., `echo "30.5" > seek`). |
+| `vol` | R/W | **Volume Node:** Gain control (0-100 unity, 101-200 digital boost). Supports reading. |
+| `play_now`| W/O | **Priority Injection:** Immediate playback of a file path without altering playlist state. |
+| `head` | R/O | **Telemetry:** High-precision float representing current playback position in seconds. |
+| `state` | R/O | **Engine Status:** Returns current playback state (`playing` or `paused`). |
+| `now_playing`| R/O | **Metadata:** Returns the filename of the currently active audio stream. |
 
 ## Build & Run
 ```bash
