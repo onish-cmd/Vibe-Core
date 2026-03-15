@@ -66,34 +66,41 @@ func watchPlayNow() {
 }
 
 func watchSeek() {
-    for {
-        // Blocks here until someone echoes to the pipe
-        f, err := os.OpenFile("seek", os.O_RDONLY, 0)
-        if err != nil {
-            continue 
-        }
-        
-        scanner := bufio.NewScanner(f)
-        for scanner.Scan() {
-            input := strings.TrimSpace(scanner.Text())
-            if sec, err := strconv.ParseFloat(input, 64); err == nil {
-                bytePos := int64(sec * sampleRate * 4)
+	for {
+		// Blocks here until someone echoes to the pipe
+		f, err := os.OpenFile("seek", os.O_RDONLY, 0)
+		if err != nil {
+			continue
+		}
 
-                mu.Lock()
-                // Seek the underlying PCM stream
-                _, err := decoder.Seek(bytePos, io.SeekStart)
-                if err == nil {
-                    // Flush the buffer
-                    for len(audioBuffer) > 0 {
-                        <-audioBuffer
-                    }
-                    currentElapsed = sec
-                }
-                mu.Unlock()
-            }
-        }
-        f.Close()
-    }
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			input := strings.TrimSpace(scanner.Text())
+			if sec, err := strconv.ParseFloat(input, 64); err == nil {
+				bytePos := int64(sec * sampleRate * 4)
+
+				mu.Lock()
+				if sec == 0 {
+					bytePos = 0
+				} else if bytePos > decoder.Length() {
+					fmt.Println("Error: Song length is smaller than asked seek!")
+					mu.Unlock()
+					continue
+				}
+				// Seek the underlying PCM stream
+				_, err := decoder.Seek(bytePos, io.SeekStart)
+				if err == nil {
+					// Flush the buffer
+					for len(audioBuffer) > 0 {
+						<-audioBuffer
+					}
+					currentElapsed = sec
+				}
+				mu.Unlock()
+			}
+		}
+		f.Close()
+	}
 }
 
 func onSamples(pOutput, pInput []byte, frameCount uint32) {
@@ -146,11 +153,16 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 			return
 		default:
 			buf := make([]byte, 4096)
+
+			mu.Lock()
 			n, err := io.ReadFull(d, buf)
+			mu.Unlock()
+
 			if n > 0 {
 				audioBuffer <- buf[:n]
 			}
 			if err != nil {
+				fmt.Println(err)
 				return
 			}
 		}
@@ -309,6 +321,8 @@ func cleanup() {
 	os.Remove("state")
 	os.Remove("now_playing")
 	os.Remove("head")
+	os.Remove("play_now")
+	os.Remove("seek")
 	os.RemoveAll("/dev/shm/vibe")
 }
 
