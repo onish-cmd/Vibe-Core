@@ -26,11 +26,11 @@
     </style>
 </head>
 <body>
-    <h1>Vibe-Core <span class="badge">v1.1.0</span></h1>
+    <h1>Vibe-Core <span class="badge">v1.2.0</span></h1>
     <p>An ultra-low latency, file-based audio engine for Linux. Designed for <strong>FOSSHack 2026</strong> with a focus on minimal resource overhead and Unix-style IPC.</p>
 
     <h2>The UAPI Architecture</h2>
-    <p>Vibe-Core operates as a headless daemon. Interaction occurs through <strong>Memory-Mapped Control Nodes</strong> in <code>/dev/shm/vibe</code>. This allows any language (Bash, Python, C) to control the engine by simply performing standard File I/O. The wrapper or user can find symlinks to <code>/dev/shm/vibe(file)</code> in the local directory.</p>
+    <p>Vibe-Core operates as a headless daemon. Interaction occurs through <strong>Memory-Mapped Control Nodes</strong> in <code>/dev/shm/vibe</code>. This allows any language (for e.g. Bash, Python, C) to control the engine by simply performing standard File I/O. The wrapper or user can find symlinks to <code>/dev/shm/vibe/(file)</code> in the local directory.</p>
 
     <h2>Control Endpoints (Write-Only)</h2>
 
