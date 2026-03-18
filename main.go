@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,6 +35,9 @@ var (
 	playNowActive  = false
 	savedIndex     int
 	savedMusicDir  string
+	sampleSum      float64
+	sampleCount    int
+	muSum          sync.Mutex
 )
 
 func watchPlayNow() {
@@ -67,21 +71,35 @@ func startTelemetry() {
 
 	for range ticker.C {
 		mu.Lock()
-		// Capture values while locked to avoid mid-write races
 		elapsed := currentElapsed
 		status := currentState
 		song := currentSong
-
 		var total float64
 		if decoder != nil {
 			total = float64(decoder.Length()) / (sampleRate * 4)
 		}
 		mu.Unlock()
 
+		// Calculate dB
+		muSum.Lock()
+		var db float64 = -100.0
+		if sampleCount > 0 {
+			rms := math.Sqrt(sampleSum / float64(sampleCount))
+			if rms > 0 {
+				db = 20 * math.Log10(rms/32768.0)
+			}
+			// RESET for the next 50ms window
+			sampleSum = 0
+			sampleCount = 0
+		}
+		muSum.Unlock()
+
+		// Write all telemetry
 		os.WriteFile("/dev/shm/vibe/head", []byte(fmt.Sprintf("%.2f", elapsed)), 0o644)
 		os.WriteFile("/dev/shm/vibe/len", []byte(fmt.Sprintf("%.2f", total)), 0o644)
 		os.WriteFile("/dev/shm/vibe/state", []byte(status), 0o644)
 		os.WriteFile("/dev/shm/vibe/now_playing", []byte(song), 0o644)
+		os.WriteFile("/dev/shm/vibe/db", []byte(fmt.Sprintf("%.1f", db)), 0o644)
 	}
 }
 
@@ -155,6 +173,10 @@ func onSamples(pOutput, pInput []byte, frameCount uint32) {
 					res = -32768
 				}
 				binary.LittleEndian.PutUint16(pOutput[readTotal+j:], uint16(int16(res)))
+				muSum.Lock()
+				sampleSum += float64(res) * float64(res)
+				sampleCount++
+				muSum.Unlock()
 			}
 			readTotal += copyLen
 			mu.Lock()
@@ -311,7 +333,7 @@ func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
 
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
@@ -349,6 +371,7 @@ func cleanup() {
 	os.Remove("play_now")
 	os.Remove("seek")
 	os.Remove("len")
+	os.Remove("db")
 	os.RemoveAll("/dev/shm/vibe")
 }
 
