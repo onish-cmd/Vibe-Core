@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/gen2brain/malgo"
 	"github.com/hajimehoshi/go-mp3"
@@ -34,11 +35,6 @@ var (
 	savedIndex     int
 	savedMusicDir  string
 )
-
-func updateUAPI() {
-	os.WriteFile("/dev/shm/vibe/state", []byte(currentState), 0o644)
-	os.WriteFile("/dev/shm/vibe/now_playing", []byte(currentSong), 0o644)
-}
 
 func watchPlayNow() {
 	for {
@@ -65,9 +61,32 @@ func watchPlayNow() {
 	}
 }
 
+func startTelemetry() {
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+
+	for range ticker.C {
+		mu.Lock()
+		// Capture values while locked to avoid mid-write races
+		elapsed := currentElapsed
+		status := currentState
+		song := currentSong
+
+		var total float64
+		if decoder != nil {
+			total = float64(decoder.Length()) / (sampleRate * 4)
+		}
+		mu.Unlock()
+
+		os.WriteFile("/dev/shm/vibe/head", []byte(fmt.Sprintf("%.2f", elapsed)), 0o644)
+		os.WriteFile("/dev/shm/vibe/len", []byte(fmt.Sprintf("%.2f", total)), 0o644)
+		os.WriteFile("/dev/shm/vibe/state", []byte(status), 0o644)
+		os.WriteFile("/dev/shm/vibe/now_playing", []byte(song), 0o644)
+	}
+}
+
 func watchSeek() {
 	for {
-		// Blocks here until someone echoes to the pipe
 		f, err := os.OpenFile("seek", os.O_RDONLY, 0)
 		if err != nil {
 			continue
@@ -76,28 +95,35 @@ func watchSeek() {
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			input := strings.TrimSpace(scanner.Text())
-			if sec, err := strconv.ParseFloat(input, 64); err == nil {
-				bytePos := int64(sec * sampleRate * 4)
+			sec, err := strconv.ParseFloat(input, 64)
+			if err != nil {
+				continue
+			}
 
-				mu.Lock()
-				if sec == 0 {
-					bytePos = 0
-				} else if bytePos > decoder.Length() {
-					fmt.Println("Error: Song length is smaller than asked seek!")
-					mu.Unlock()
-					continue
-				}
-				// Seek the underlying PCM stream
+			mu.Lock()
+			if decoder == nil {
+				mu.Unlock()
+				continue
+			}
+
+			bytePos := int64(sec * sampleRate * 4)
+			if bytePos >= 0 && bytePos <= decoder.Length() {
 				_, err := decoder.Seek(bytePos, io.SeekStart)
 				if err == nil {
-					// Flush the buffer
-					for len(audioBuffer) > 0 {
-						<-audioBuffer
+				drain:
+					for {
+						select {
+						case <-audioBuffer:
+						default:
+							break drain
+						}
 					}
 					currentElapsed = sec
 				}
-				mu.Unlock()
+			} else {
+				fmt.Println("[VIBE] Seek out of bounds")
 			}
+			mu.Unlock()
 		}
 		f.Close()
 	}
@@ -135,7 +161,6 @@ func onSamples(pOutput, pInput []byte, frameCount uint32) {
 			if currentState == "playing" {
 				currentElapsed += float64(frameCount) / sampleRate
 			}
-			os.WriteFile("/dev/shm/vibe/head", []byte(fmt.Sprintf("%.2f", currentElapsed)), 0o644)
 			mu.Unlock()
 		default:
 			for i := readTotal; i < outputLen; i++ {
@@ -243,7 +268,6 @@ func playNext(ctx *malgo.AllocatedContext) {
 	currentState = "playing"
 	currentSong = filePath
 	mu.Unlock()
-	updateUAPI()
 
 	for {
 		select {
@@ -276,6 +300,7 @@ func main() {
 	go watchCtl()
 	go watchPlayNow()
 	go watchSeek()
+	go startTelemetry()
 
 	for {
 		playNext(ctx)
@@ -286,7 +311,7 @@ func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
 
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
@@ -323,6 +348,7 @@ func cleanup() {
 	os.Remove("head")
 	os.Remove("play_now")
 	os.Remove("seek")
+	os.Remove("len")
 	os.RemoveAll("/dev/shm/vibe")
 }
 
@@ -350,7 +376,6 @@ func watchCtl() {
 					mu.Lock()
 					currentState = "paused"
 					mu.Unlock()
-					updateUAPI()
 				}
 			case "resume":
 				if device != nil {
@@ -358,7 +383,6 @@ func watchCtl() {
 					mu.Lock()
 					currentState = "playing"
 					mu.Unlock()
-					updateUAPI()
 				}
 			case "next":
 				skip <- true
@@ -372,7 +396,7 @@ func watchCtl() {
 				fmt.Println("Finished.")
 				os.Exit(0)
 			}
-			f.Close()
 		}
+		f.Close()
 	}
 }

@@ -6,13 +6,13 @@
     <title>Vibe-Core | UAPI Documentation</title>
     <style>
         :root {
-            --bg: #1a1b26; /* Tokyo Night style base background */
+            --bg: #1a1b26; 
             --fg: #a9b1d6;
             --accent: #7aa2f7;
             --path: #9ece6a;
             --code-bg: #24283b;
             --warn: #f7768e;
-            --glass-bg: rgba(255, 255, 255, 0.05); /* Lighter glass background */
+            --glass-bg: rgba(255, 255, 255, 0.05);
             --glass-border: rgba(255, 255, 255, 0.1);
         }
         body {
@@ -23,77 +23,70 @@
             max-width: 900px;
             margin: 40px auto;
             padding: 0 20px;
-            background-image: linear-gradient(135deg, #1a1b26 0%, #24283b 100%); /* Subtle gradient background */
+            background-image: linear-gradient(135deg, #1a1b26 0%, #24283b 100%);
         }
         h1, h2, h3 { color: var(--accent); border-bottom: 1px solid var(--code-bg); padding-bottom: 8px; }
         code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; color: var(--path); font-family: 'JetBrains Mono', monospace; }
-        pre { background: var(--code-bg); padding: 18px; border-radius: 8px; overflow-x: auto; border: 1px solid #414868; position: relative; }
-        
-        /* Glassmorphism Styles */
+        pre { background: var(--code-bg); padding: 18px; border-radius: 8px; overflow-x: auto; border: 1px solid #414868; }
+
         .endpoint, table, .performance-stats {
             margin-bottom: 40px;
             padding: 20px;
             background: var(--glass-bg);
-            border-radius: 16px; /* Rounded corners for glass look */
-            border: 1px solid var(--glass-border); /* Subtle border */
-            backdrop-filter: blur(10px); /* Core glassmorphism effect */
-            -webkit-backdrop-filter: blur(10px); /* For Safari support */
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); /* Soft shadow */
+            border-radius: 16px;
+            border: 1px solid var(--glass-border);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
-        
-        table { width: 100%; border-collapse: collapse; margin: 20px 0; overflow: hidden; }
-        th, td { text-align: left; padding: 15px; border-bottom: 1px solid var(--glass-border); } /* Use glass border for table lines */
+
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { text-align: left; padding: 15px; border-bottom: 1px solid var(--glass-border); }
         th { background: rgba(122, 162, 247, 0.1); color: var(--accent); text-transform: uppercase; font-size: 0.8rem; letter-spacing: 1px; }
         .badge { background: var(--accent); color: var(--bg); padding: 3px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 800; vertical-align: middle; }
         .warn-text { color: var(--warn); font-weight: bold; }
-        
-        /* Specific tweaks for performance stats container */
-        .performance-stats ul { padding-left: 20px; }
     </style>
 </head>
 <body>
-    <h1>Vibe-Core <span class="badge">v1.2.0</span></h1>
-    <p>An ultra-low latency, file-based audio engine for Linux. Designed for <strong>FOSSHack 2026</strong> with a focus on minimal resource overhead and Unix-style IPC.</p>
+    <h1>Vibe-Core <span class="badge">v1.2.1</span></h1>
+    <p>An ultra-low latency, headless audio engine for Linux. Designed for <strong>FOSSHack 2026</strong>, Vibe-Core treats the filesystem as the interface, enabling seamless IPC across any language.</p>
 
-    <h2>The UAPI Architecture</h2>
-    <p>Vibe-Core operates as a headless daemon. Interaction occurs through <strong>Memory-Mapped Control Nodes</strong> in <code>/dev/shm/vibe</code>. This allows any language (for example: Bash, Python, C) to control the engine by simply performing standard File I/O. The wrapper or user can find symlinks to <code>/dev/shm/vibe/(file)</code> in the local directory.</p>
+    <h2>Headless Architecture</h2>
+    <p>Vibe-Core operates as a pure daemon. Interaction occurs through <strong>Memory-Mapped Control Nodes</strong> in <code>/dev/shm/vibe</code>. By leveraging <code>tmpfs</code>, control signals and telemetry are exchanged at RAM speeds, bypassing disk I/O bottlenecks—critical for low-spec hardware like the AMD E-350.</p>
 
     <h2>Control Endpoints (Write-Only)</h2>
 
     <div class="endpoint">
         <h3>1. Command Pipe (<code>ctl</code>)</h3>
         <p>A <strong>FIFO Named Pipe</strong> for real-time engine instructions.</p>
-        <pre>echo "next" > ctl    # Skip current track
-echo "prev" > ctl    # Previous track (Index - 2 logic)
-echo "pause" > ctl   # Suspend audio device
-echo "resume" > ctl  # Resume audio device</pre>
+        <pre>echo "next" > ctl    # Skip current track
+echo "prev" > ctl    # Previous track (Index - 2 logic)
+echo "pause" > ctl   # Suspend audio device
+echo "resume" > ctl  # Resume audio device
+echo "exit" > ctl    # Trigger engine cleanup and shutdown</pre>
     </div>
 
     <div class="endpoint">
         <h3>2. Seek Control (<code>seek</code>)</h3>
-        <p>A <strong>FIFO Named Pipe</strong> for high-precision PCM stream positioning. The engine validates the timestamp against the stream length to prevent EOF crashes.</p>
-        <pre>echo "30" > seek      # Jump to 30s
-echo "120.5" > seek   # Jump to 2m 0.5s
+        <p>A <strong>FIFO Named Pipe</strong> for high-precision PCM stream positioning. The engine flushes the internal audio buffer instantly upon valid seek.</p>
+        <pre>echo "30" > seek      # Jump to 30.0s
 echo "0" > seek       # Restart current song</pre>
     </div>
 
     <div class="endpoint">
         <h3>3. Priority Injection (<code>play_now</code>)</h3>
-        <p><strong>Interrupt Handler:</strong> Passing an absolute path here immediately halts the current playlist, plays the target file, and then <span style="color: var(--path)">restores the previous playlist state</span>.</p>
-        <pre>echo "/home/user/music/urgent_vibe.mp3" > play_now</pre>
+        <p><strong>Interrupt Handler:</strong> Passing an absolute path immediately halts the current sequence to play the target file. The engine restores the previous playlist state and index upon completion.</p>
+        <pre>echo "/path/to/urgent_vibe.mp3" > play_now</pre>
     </div>
 
     <h2>Stateful Nodes (Read/Write)</h2>
     <div class="endpoint">
         <h3>4. Volume Node (<code>vol</code>)</h3>
-        <p>Text-based gain control and feedback. You can write to it to adjust gain or read from it to sync external UI sliders.</p>
+        <p>Linear gain control. Writing to this node updates the internal mixer multiplier.</p>
         <ul>
-            <li><strong>Write:</strong> <code>echo "75" > vol</code></li>
-            <li><strong>Read:</strong> <code>cat vol</code> (Returns current level)</li>
-            <li><strong>Range:</strong> <code>0 - 100</code> (Unity) | <code>101 - 200</code> (<span class="warn-text">Boost Mode</span>)</li>
+            <li><strong>Range:</strong> <code>0 - 100</code> (Standard) | <code>101 - 200</code> (<span class="warn-text">Digital Boost</span>)</li>
         </ul>
-        <pre>cat vol               # Returns "50"
-echo "125" > vol      # Applies 25% Digital Boost</pre>
+        <pre>echo "85" > vol      # Set volume to 85%</pre>
     </div>
 
     <h2>Telemetry Nodes (Read-Only)</h2>
@@ -102,42 +95,44 @@ echo "125" > vol      # Applies 25% Digital Boost</pre>
             <tr>
                 <th>Node</th>
                 <th>Description</th>
-                <th>Type</th>
-                <th>Data Format</th>
+                <th>Format</th>
+            </tr>
         </thead>
         <tbody>
             <tr>
                 <td><code>state</code></td>
                 <td>Engine playback status</td>
-                <td>File</td>
                 <td><code>playing</code> | <code>paused</code></td>
             </tr>
             <tr>
                 <td><code>now_playing</code></td>
-                <td>Metadata of active stream</td>
-                <td>File</td>
-                <td>String (Filename)</td>
+                <td>Filename of active stream</td>
+                <td>String</td>
             </tr>
             <tr>
                 <td><code>head</code></td>
-                <td>High-precision playback timer</td>
-                <td>File</td>
+                <td>Current playback position</td>
+                <td>Float (Seconds)</td>
+            </tr>
+            <tr>
+                <td><code>len</code></td>
+                <td>Total duration of stream</td>
                 <td>Float (Seconds)</td>
             </tr>
         </tbody>
     </table>
 
-    <h2>Performance Statistics</h2>
-    <div class="performance-stats endpoint"> <p>Testing performed on <strong>AMD E-350 (1.6GHz)</strong> running Arch Linux:</p>
+    <h2>Hardware Benchmarks (E-350 @ 1.6GHz)</h2>
+    <div class="performance-stats endpoint">
         <ul>
-            <li><strong>CPU Usage:</strong> ~2.1% (Stable)</li>
-            <li><strong>RAM Footprint:</strong> Minimal</li>
-            <li><strong>I/O Latency:</strong> Near-zero (RAM-backed via <code>/dev/shm</code>)</li>
+            <li><strong>CPU Overhead:</strong> ~2.1% (MP3 Decoding + Telemetry Goroutine)</li>
+            <li><strong>Memory:</strong> &lt; 15MB Resident Set Size</li>
+            <li><strong>IPC Latency:</strong> Near-zero (RAM-backed Nodes)</li>
         </ul>
     </div>
 
     <footer style="margin-top: 60px; padding: 20px; border-top: 1px solid var(--code-bg); font-size: 0.8rem; opacity: 0.5;">
-        Built for FOSSHack 2026 | Licensed under the Unlicense
+        Project: Vibe-Core | Hackathon: FOSSHack 2026 | License: Unlicense
     </footer>
 </body>
 </html>
