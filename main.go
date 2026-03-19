@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/gen2brain/malgo"
 	"github.com/hajimehoshi/go-mp3"
 )
@@ -29,7 +30,7 @@ var (
 	decoder        *mp3.Decoder
 	playlist       []string
 	index          = 0
-	skip           = make(chan bool)
+	skip           = make(chan bool, 1)
 	musicDir       = "music"
 	audioBuffer    = make(chan []byte, 512)
 	playNowActive  = false
@@ -38,27 +39,78 @@ var (
 	sampleSum      float64
 	sampleCount    int
 	muSum          sync.Mutex
+	needsRefresh   = true
 )
+
+func watchMusicDir() {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		fmt.Println("[VIBE] inotify init failed:", err)
+		return
+	}
+	defer watcher.Close()
+
+	// Tell the kernel to watch your music folder
+	err = watcher.Add(musicDir)
+	if err != nil {
+		fmt.Println("[VIBE] Failed to watch dir:", err)
+		return
+	}
+
+	for {
+		select {
+		case event, ok := <-watcher.Events:
+			if !ok {
+				return
+			}
+			// We only care about things that change the file list
+			if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
+				mu.Lock()
+				needsRefresh = true
+				mu.Unlock()
+				fmt.Println("[VIBE] Kernel signaled change, refresh queued.")
+			}
+		case err, ok := <-watcher.Errors:
+			if !ok {
+				return
+			}
+			fmt.Println("[VIBE] inotify error:", err)
+		}
+	}
+}
 
 func watchPlayNow() {
 	for {
-		f, _ := os.OpenFile("play_now", os.O_RDONLY, 0)
+		// This blocks until a writer (like echo) opens the pipe
+		f, err := os.OpenFile("play_now", os.O_RDONLY, 0)
+		if err != nil {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			path := strings.TrimSpace(scanner.Text())
+			if path == "" {
+				continue
+			}
+
 			if _, err := os.Stat(path); err == nil {
 				mu.Lock()
-				if !playNowActive {
-					savedIndex = index
-					savedMusicDir = musicDir
-				}
+				savedIndex = index
+				savedMusicDir = musicDir
+
 				playlist = []string{filepath.Base(path)}
 				musicDir = filepath.Dir(path)
 				index = 0
 				playNowActive = true
 				mu.Unlock()
 
-				skip <- true // Force engine to reload with this new path
+				select {
+				case skip <- true:
+					fmt.Println("[VIBE] Switching to:", path)
+				default:
+				}
 			}
 		}
 		f.Close()
@@ -209,7 +261,9 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 				audioBuffer <- buf[:n]
 			}
 			if err != nil {
-				fmt.Println(err)
+				if err != io.EOF && err != io.ErrUnexpectedEOF {
+					fmt.Println(err)
+				}
 				return
 			}
 		}
@@ -218,16 +272,14 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 
 func playNext(ctx *malgo.AllocatedContext) {
 	mu.Lock()
-	if playNowActive {
-		playNowActive = false
-	} else {
+	if needsRefresh {
 		if savedMusicDir != "" {
 			musicDir = savedMusicDir
 			index = savedIndex
 			savedMusicDir = ""
 		}
 		playlist = nil
-		files, _ := os.ReadDir("music")
+		files, _ := os.ReadDir(musicDir)
 		for _, f := range files {
 			if strings.ToLower(filepath.Ext(f.Name())) == ".mp3" {
 				playlist = append(playlist, f.Name())
@@ -238,6 +290,7 @@ func playNext(ctx *malgo.AllocatedContext) {
 			fmt.Println("No MP3s found.")
 			return
 		}
+		needsRefresh = false
 	}
 	filePath := playlist[index]
 	f, err := os.Open(filepath.Join(musicDir, filePath))
@@ -323,6 +376,7 @@ func main() {
 	go watchPlayNow()
 	go watchSeek()
 	go startTelemetry()
+	go watchMusicDir()
 
 	for {
 		playNext(ctx)
