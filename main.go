@@ -1,20 +1,12 @@
 package main
 
 import (
-	"bufio"
-	"encoding/binary"
 	"fmt"
-	"io"
-	"math"
 	"os"
 	"path/filepath"
-	"strconv"
-	"strings"
 	"sync"
 	"syscall"
-	"time"
 
-	"github.com/fsnotify/fsnotify"
 	"github.com/gen2brain/malgo"
 	"github.com/hajimehoshi/go-mp3"
 )
@@ -40,330 +32,8 @@ var (
 	sampleCount    int
 	muSum          sync.Mutex
 	needsRefresh   = true
+	specChan       = make(chan []float64, 5)
 )
-
-func watchMusicDir() {
-	watcher, err := fsnotify.NewWatcher()
-	if err != nil {
-		fmt.Println("[VIBE] inotify init failed:", err)
-		return
-	}
-	defer watcher.Close()
-
-	// Tell the kernel to watch your music folder
-	err = watcher.Add(musicDir)
-	if err != nil {
-		fmt.Println("[VIBE] Failed to watch dir:", err)
-		return
-	}
-
-	for {
-		select {
-		case event, ok := <-watcher.Events:
-			if !ok {
-				return
-			}
-			// We only care about things that change the file list
-			if event.Has(fsnotify.Create) || event.Has(fsnotify.Remove) || event.Has(fsnotify.Rename) {
-				mu.Lock()
-				needsRefresh = true
-				mu.Unlock()
-				fmt.Println("[VIBE] Kernel signaled change, refresh queued.")
-			}
-		case err, ok := <-watcher.Errors:
-			if !ok {
-				return
-			}
-			fmt.Println("[VIBE] inotify error:", err)
-		}
-	}
-}
-
-func watchPlayNow() {
-	for {
-		// This blocks until a writer (like echo) opens the pipe
-		f, err := os.OpenFile("play_now", os.O_RDONLY, 0)
-		if err != nil {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			path := strings.TrimSpace(scanner.Text())
-			if path == "" {
-				continue
-			}
-
-			if _, err := os.Stat(path); err == nil {
-				mu.Lock()
-				savedIndex = index
-				savedMusicDir = musicDir
-
-				playlist = []string{filepath.Base(path)}
-				musicDir = filepath.Dir(path)
-				index = 0
-				playNowActive = true
-				mu.Unlock()
-
-				select {
-				case skip <- true:
-					fmt.Println("[VIBE] Switching to:", path)
-				default:
-				}
-			}
-		}
-		f.Close()
-	}
-}
-
-func startTelemetry() {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		mu.Lock()
-		elapsed := currentElapsed
-		status := currentState
-		song := currentSong
-		var total float64
-		if decoder != nil {
-			total = float64(decoder.Length()) / (sampleRate * 4)
-		}
-		mu.Unlock()
-
-		// Calculate dB
-		muSum.Lock()
-		var db float64 = -100.0
-		if sampleCount > 0 {
-			rms := math.Sqrt(sampleSum / float64(sampleCount))
-			if rms > 0 {
-				db = 20 * math.Log10(rms/32768.0)
-			}
-			// RESET for the next 50ms window
-			sampleSum = 0
-			sampleCount = 0
-		}
-		muSum.Unlock()
-
-		// Write all telemetry
-		os.WriteFile("/dev/shm/vibe/head", []byte(fmt.Sprintf("%.2f", elapsed)), 0o644)
-		os.WriteFile("/dev/shm/vibe/len", []byte(fmt.Sprintf("%.2f", total)), 0o644)
-		os.WriteFile("/dev/shm/vibe/state", []byte(status), 0o644)
-		os.WriteFile("/dev/shm/vibe/now_playing", []byte(song), 0o644)
-		os.WriteFile("/dev/shm/vibe/db", []byte(fmt.Sprintf("%.1f", db)), 0o644)
-	}
-}
-
-func watchSeek() {
-	for {
-		f, err := os.OpenFile("seek", os.O_RDONLY, 0)
-		if err != nil {
-			continue
-		}
-
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			input := strings.TrimSpace(scanner.Text())
-			sec, err := strconv.ParseFloat(input, 64)
-			if err != nil {
-				continue
-			}
-
-			mu.Lock()
-			if decoder == nil {
-				mu.Unlock()
-				continue
-			}
-
-			bytePos := int64(sec * sampleRate * 4)
-			if bytePos >= 0 && bytePos <= decoder.Length() {
-				_, err := decoder.Seek(bytePos, io.SeekStart)
-				if err == nil {
-				drain:
-					for {
-						select {
-						case <-audioBuffer:
-						default:
-							break drain
-						}
-					}
-					currentElapsed = sec
-				}
-			} else {
-				fmt.Println("[VIBE] Seek out of bounds")
-			}
-			mu.Unlock()
-		}
-		f.Close()
-	}
-}
-
-func onSamples(pOutput, pInput []byte, frameCount uint32) {
-	outputLen := len(pOutput)
-	readTotal := 0
-
-	mu.Lock()
-	vFixed := int32(volume * 256)
-	mu.Unlock()
-
-	for readTotal < outputLen {
-		select {
-		case chunk := <-audioBuffer:
-			copyLen := len(chunk)
-			if readTotal+copyLen > outputLen {
-				copyLen = outputLen - readTotal
-			}
-
-			for j := 0; j < copyLen; j += 2 {
-				sample := int16(binary.LittleEndian.Uint16(chunk[j : j+2]))
-				res := (int32(sample) * vFixed) >> 8
-
-				if res > 32767 {
-					res = 32767
-				} else if res < -32768 {
-					res = -32768
-				}
-				binary.LittleEndian.PutUint16(pOutput[readTotal+j:], uint16(int16(res)))
-				muSum.Lock()
-				sampleSum += float64(res) * float64(res)
-				sampleCount++
-				muSum.Unlock()
-			}
-			readTotal += copyLen
-			mu.Lock()
-			if currentState == "playing" {
-				currentElapsed += float64(frameCount) / sampleRate
-			}
-			mu.Unlock()
-		default:
-			for i := readTotal; i < outputLen; i++ {
-				pOutput[i] = 0
-			}
-			return
-		}
-	}
-}
-
-func decodeLoop(d *mp3.Decoder, stop chan bool) {
-	for {
-		select {
-		case <-stop:
-			return
-		default:
-			buf := make([]byte, 4096)
-
-			mu.Lock()
-			n, err := io.ReadFull(d, buf)
-			mu.Unlock()
-
-			if n > 0 {
-				audioBuffer <- buf[:n]
-			}
-			if err != nil {
-				if err != io.EOF && err != io.ErrUnexpectedEOF {
-					fmt.Println(err)
-				}
-				return
-			}
-		}
-	}
-}
-
-func playNext(ctx *malgo.AllocatedContext) {
-	mu.Lock()
-	if needsRefresh {
-		if savedMusicDir != "" {
-			musicDir = savedMusicDir
-			index = savedIndex
-			savedMusicDir = ""
-		}
-		playlist = nil
-		files, _ := os.ReadDir(musicDir)
-		for _, f := range files {
-			if strings.ToLower(filepath.Ext(f.Name())) == ".mp3" {
-				playlist = append(playlist, f.Name())
-			}
-		}
-
-		if len(playlist) == 0 {
-			fmt.Println("No MP3s found.")
-			return
-		}
-		needsRefresh = false
-	}
-	filePath := playlist[index]
-	f, err := os.Open(filepath.Join(musicDir, filePath))
-	if err != nil {
-		index = (index + 1) % len(playlist)
-		return
-	}
-	defer f.Close()
-
-	d, err := mp3.NewDecoder(f)
-	if err != nil {
-		index = (index + 1) % len(playlist)
-		return
-	}
-	decoder = d
-
-	sRate := uint32(d.SampleRate())
-	sampleRate = float64(sRate)
-	currentElapsed = 0
-	mu.Unlock()
-
-	// Drain old buffer data
-	for len(audioBuffer) > 0 {
-		<-audioBuffer
-	}
-
-	stopDecode := make(chan bool)
-	go decodeLoop(d, stopDecode)
-
-	for len(audioBuffer) < 1 {
-		syscall.Select(0, nil, nil, nil, &syscall.Timeval{Usec: 10000})
-	}
-
-	deviceConfig := malgo.DefaultDeviceConfig(malgo.Playback)
-	deviceConfig.Playback.Format = malgo.FormatS16
-	deviceConfig.Playback.Channels = 2
-	deviceConfig.SampleRate = sRate
-	deviceConfig.Alsa.NoMMap = 1
-	deviceConfig.PeriodSizeInFrames = 1024
-
-	device, err = malgo.InitDevice(ctx.Context, deviceConfig, malgo.DeviceCallbacks{Data: onSamples})
-	if err != nil {
-		close(stopDecode)
-		return
-	}
-
-	fmt.Printf("\n[VIBE] %s (%dHz)\n", filePath, sRate)
-	device.Start()
-	mu.Lock()
-	currentState = "playing"
-	currentSong = filePath
-	mu.Unlock()
-
-	for {
-		select {
-		case <-skip:
-			goto stop
-		default:
-			if len(audioBuffer) == 0 {
-				fmt.Println("Song end")
-				goto stop
-			}
-			syscall.Select(0, nil, nil, nil, &syscall.Timeval{Usec: 100000})
-		}
-	}
-
-stop:
-	device.Uninit()
-	close(stopDecode)
-	mu.Lock()
-	index = (index + 1) % len(playlist)
-	mu.Unlock()
-}
 
 func main() {
 	setupFiles()
@@ -371,6 +41,7 @@ func main() {
 	ctx, _ := malgo.InitContext(nil, malgo.ContextConfig{}, nil)
 	defer ctx.Free()
 
+	// Start all background workers
 	go watchVolume()
 	go watchCtl()
 	go watchPlayNow()
@@ -386,13 +57,10 @@ func main() {
 func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
-
 	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
-
-		// Setup the actual RAM-backed nodes
 		if node == "ctl" || node == "play_now" || node == "seek" {
 			os.Remove(fullShmPath)
 			syscall.Mkfifo(fullShmPath, 0o666)
@@ -400,80 +68,19 @@ func setupFiles() {
 			if _, err := os.Stat(fullShmPath); os.IsNotExist(err) {
 				os.WriteFile(fullShmPath, []byte("50"), 0o644)
 			}
-		} else if node == "head" {
-			// Initialize head at 0 so hooks don't read an empty file
-			os.WriteFile(fullShmPath, []byte("0.00"), 0o644)
 		} else {
 			os.WriteFile(fullShmPath, []byte(""), 0o644)
 		}
-
-		os.Remove(node) // Clear any old local files/links
-		err := os.Symlink(fullShmPath, node)
-		if err != nil {
-			fmt.Printf("[!] Failed to symlink %s: %v\n", node, err)
-		}
+		os.Remove(node)
+		os.Symlink(fullShmPath, node)
 	}
 }
 
 func cleanup() {
 	fmt.Println("\n[VIBE] Cleaning up UAPI...")
-	os.Remove("ctl")
-	os.Remove("vol")
-	os.Remove("state")
-	os.Remove("now_playing")
-	os.Remove("head")
-	os.Remove("play_now")
-	os.Remove("seek")
-	os.Remove("len")
-	os.Remove("db")
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "spectrum"}
+	for _, n := range nodes {
+		os.Remove(n)
+	}
 	os.RemoveAll("/dev/shm/vibe")
-}
-
-func watchVolume() {
-	for {
-		data, _ := os.ReadFile("vol")
-		if v, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			mu.Lock()
-			volume = float32(v) / 100.0
-			mu.Unlock()
-		}
-		syscall.Select(0, nil, nil, nil, &syscall.Timeval{Sec: 0, Usec: 500000})
-	}
-}
-
-func watchCtl() {
-	for {
-		f, _ := os.OpenFile("ctl", os.O_RDONLY, 0)
-		scanner := bufio.NewScanner(f)
-		for scanner.Scan() {
-			switch strings.TrimSpace(scanner.Text()) {
-			case "pause":
-				if device != nil {
-					device.Stop()
-					mu.Lock()
-					currentState = "paused"
-					mu.Unlock()
-				}
-			case "resume":
-				if device != nil {
-					device.Start()
-					mu.Lock()
-					currentState = "playing"
-					mu.Unlock()
-				}
-			case "next":
-				skip <- true
-			case "prev":
-				mu.Lock()
-				index = (index - 2 + len(playlist)) % len(playlist)
-				mu.Unlock()
-				skip <- true
-			case "exit":
-				cleanup()
-				fmt.Println("Finished.")
-				os.Exit(0)
-			}
-		}
-		f.Close()
-	}
 }
