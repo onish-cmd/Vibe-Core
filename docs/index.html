@@ -1,249 +1,199 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Vibe-Core | UAPI Documentation</title>
-    <style>
-      :root {
-        --bg: #1a1b26;
-        --fg: #a9b1d6;
-        --accent: #7aa2f7;
-        --path: #9ece6a;
-        --code-bg: #24283b;
-        --warn: #f7768e;
-        --glass-bg: rgba(255, 255, 255, 0.05);
-        --glass-border: rgba(255, 255, 255, 0.1);
-      }
-      body {
-        font-family: "Inter", "Segoe UI", system-ui, sans-serif;
-        background-color: var(--bg);
-        color: var(--fg);
-        line-height: 1.6;
-        max-width: 900px;
-        margin: 40px auto;
-        padding: 0 20px;
-        background-image: linear-gradient(135deg, #1a1b26 0%, #24283b 100%);
-      }
-      h1,
-      h2,
-      h3 {
-        color: var(--accent);
-        border-bottom: 1px solid var(--code-bg);
-        padding-bottom: 8px;
-      }
-      code {
-        background: var(--code-bg);
-        padding: 2px 6px;
-        border-radius: 4px;
-        color: var(--path);
-        font-family: "JetBrains Mono", monospace;
-      }
-      pre {
-        background: var(--code-bg);
-        padding: 18px;
-        border-radius: 8px;
-        overflow-x: auto;
-        border: 1px solid #414868;
-      }
 
-      .endpoint,
-      table,
-      .performance-stats {
-        margin-bottom: 40px;
-        padding: 20px;
-        background: var(--glass-bg);
-        border-radius: 16px;
-        border: 1px solid var(--glass-border);
-        backdrop-filter: blur(10px);
-        -webkit-backdrop-filter: blur(10px);
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      }
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vibe-Core | UAPI Documentation</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/prism-themes/1.9.0/prism-vsc-dark-plus.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #1a1b26;
+      --bg-dark: #16161e;
+      --fg: #a9b1d6;
+      --accent: #7aa2f7;
+      --path: #9ece6a;
+      --code-bg: #24283b;
+      --warn: #f7768e;
+      --purple: #bb9af7;
+      --border: #414868;
+    }
 
-      table {
-        width: 100%;
-        border-collapse: collapse;
-        margin: 20px 0;
-      }
-      th,
-      td {
-        text-align: left;
-        padding: 15px;
-        border-bottom: 1px solid var(--glass-border);
-      }
-      th {
-        background: rgba(122, 162, 247, 0.1);
-        color: var(--accent);
-        text-transform: uppercase;
-        font-size: 0.8rem;
-        letter-spacing: 1px;
-      }
-      .badge {
-        background: var(--accent);
-        color: var(--bg);
-        padding: 3px 10px;
-        border-radius: 12px;
-        font-size: 0.75rem;
-        font-weight: 800;
-        vertical-align: middle;
-      }
-      .warn-text {
-        color: var(--warn);
-        font-weight: bold;
-      }
-    </style>
-  </head>
-  <body>
-    <h1>Vibe-Core <span class="badge">v1.3.0</span></h1>
-    <p>
-      An ultra-low latency, headless audio engine for Linux. Designed for
-      <strong>FOSSHack 2026</strong>, Vibe-Core treats the filesystem as the
-      interface, enabling seamless IPC across any language.
-    </p>
+    body {
+      font-family: "Inter", system-ui, sans-serif;
+      background-color: var(--bg);
+      color: var(--fg);
+      line-height: 1.6;
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 40px 20px;
+    }
 
-    <h2>Headless Architecture</h2>
-    <p>
-      Vibe-Core operates as a pure daemon. Interaction occurs through
-      <strong>Memory-Mapped Control Nodes</strong> in
-      <code>/dev/shm/vibe</code>. By leveraging <code>tmpfs</code>, control
-      signals and telemetry are exchanged at RAM speeds, bypassing disk I/O
-      bottlenecks—critical for low-spec hardware like the AMD E-350.
-    </p>
+    h1,
+    h2,
+    h3 {
+      color: var(--accent);
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
 
-    <h2>Control Endpoints (Write-Only)</h2>
+    .section {
+      background: rgba(36, 40, 59, 0.5);
+      padding: 25px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      margin-bottom: 30px;
+    }
 
-    <div class="endpoint">
-      <h3>1. Command Pipe (<code>ctl</code>)</h3>
-      <p>
-        A <strong>FIFO Named Pipe</strong> for real-time engine instructions.
-      </p>
-      <pre>
-echo "next" > ctl    # Skip current track
-echo "prev" > ctl    # Previous track (Index - 2 logic)
-echo "pause" > ctl   # Suspend audio device
-echo "resume" > ctl  # Resume audio device
-echo "exit" > ctl    # Trigger engine cleanup and shutdown</pre
-      >
-    </div>
+    code {
+      background: var(--code-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--purple);
+      font-family: monospace;
+    }
 
-    <div class="endpoint">
-      <h3>2. Seek Control (<code>seek</code>)</h3>
-      <p>
-        A <strong>FIFO Named Pipe</strong> for high-precision PCM stream
-        positioning. The engine flushes the internal audio buffer instantly upon
-        valid seek.
-      </p>
-      <pre>
-echo "30" > seek      # Jump to 30.0s
-echo "0" > seek       # Restart current song</pre
-      >
-    </div>
+    pre[class*="language-"] {
+      background: var(--bg-dark) !important;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+    }
 
-    <div class="endpoint">
-      <h3>3. Priority Injection (<code>play_now</code>)</h3>
-      <p>
-        <strong>Interrupt Handler:</strong> Passing an absolute path immediately
-        halts the current sequence to play the target file. The engine restores
-        the previous playlist state and index upon completion.
-      </p>
-      <pre>echo "/path/to/urgent_vibe.mp3" > play_now</pre>
-    </div>
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 20px 0;
+    }
 
-    <div class="endpoint">
-      <h3>4. Energy Telemetry (<code>db</code>)</h3>
-      <p>
-        <strong>Real-time Root Mean Square (RMS) Calculation:</strong>
-        Calculated in the 20Hz telemetry loop to ensure zero jitter in the audio
-        thread. Measures relative signal intensity against the 16-bit digital
-        ceiling.
-      </p>
-      <ul>
-        <li>
-          <strong>0.0 dB:</strong> Full-scale digital peak (Hard Clipping
-          limit).
-        </li>
-        <li><strong>-12.0 to -6.0 dB:</strong> Dynamic range "Sweet Spot".</li>
-        <li><strong>-100.0 dB:</strong> Digital floor/Silence.</li>
-      </ul>
-      <pre>cat db  # Output: -18.4</pre>
-    </div>
+    th,
+    td {
+      text-align: left;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
 
-    <h2>Stateful Nodes (Read/Write)</h2>
-    <div class="endpoint">
-      <h3>5. Volume Node (<code>vol</code>)</h3>
-      <p>
-        Linear gain control. Writing to this node updates the internal mixer
-        multiplier.
-      </p>
-      <ul>
-        <li>
-          <strong>Range:</strong> <code>0 - 100</code> (Standard) |
-          <code>101 - 200</code> (<span class="warn-text">Digital Boost</span>)
-        </li>
-      </ul>
-      <pre>echo "85" > vol      # Set volume to 85%</pre>
-    </div>
+    th {
+      color: var(--accent);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+    }
 
-    <h2>Telemetry Nodes (Read-Only)</h2>
+    .badge {
+      background: var(--accent);
+      color: var(--bg);
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: bold;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>Vibe-Core <span class="badge">v1.4.0</span></h1>
+  <p>A headless Linux audio engine using <strong>Memory-Mapped IPC</strong>. All nodes reside in
+    <code>/dev/shm/vibe/</code>.
+  </p>
+
+  <div class="section">
+    <h2>1. Control Interface (FIFOs)</h2>
+    <p>These nodes use <code>mkfifo</code>. Writing to them triggers immediate engine reactions.</p>
+
+    <h3>Command Pipe (<code>ctl</code>)</h3>
+    <pre><code class="language-bash">echo "pause" > ctl # Suspend playback
+        echo "resume" > ctl # Resume playback
+        echo "next" > ctl # Skip to next track
+        echo "shuffle" > ctl # Toggle Fisher-Yates (Writes to shuffle_state)
+        echo "exit" > ctl # Cleanup and terminate engine</code></pre>
+
+    <h3>Seek Control (<code>seek</code>)</h3>
+    <p>Instantly drains the audio buffer and repositions the MP3 decoder.</p>
+    <pre><code class="language-bash">echo "45.5" > seek # Jump to 45.5 seconds</code></pre>
+
+    <h3>Priority Injection (<code>play_now</code>)</h3>
+    <p>Interrupts current playlist, saves the <code>index</code>, and plays a specific file. Returns to original state
+      after.</p>
+    <pre><code class="language-bash">echo "/home/onish/music/alert.mp3" > play_now</code></pre>
+  </div>
+
+  <div class="section">
+    <h2>2. Stateful & Telemetry Nodes</h2>
     <table>
       <thead>
         <tr>
           <th>Node</th>
-          <th>Description</th>
+          <th>Type</th>
           <th>Format</th>
+          <th>Description</th>
         </tr>
       </thead>
       <tbody>
         <tr>
+          <td><code>vol</code></td>
+          <td>R/W</td>
+          <td>0-100</td>
+          <td>Linear gain. Initialized at 50.</td>
+        </tr>
+        <tr>
           <td><code>state</code></td>
-          <td>Engine playback status</td>
+          <td>RO</td>
+          <td>string</td>
           <td><code>playing</code> | <code>paused</code></td>
         </tr>
         <tr>
           <td><code>now_playing</code></td>
-          <td>Filename of active stream</td>
-          <td>String</td>
+          <td>RO</td>
+          <td>string</td>
+          <td>Filename of active MP3.</td>
         </tr>
         <tr>
           <td><code>head</code></td>
-          <td>Current playback position</td>
-          <td>Float (Seconds)</td>
+          <td>RO</td>
+          <td>float</td>
+          <td>Current elapsed time (seconds).</td>
         </tr>
         <tr>
           <td><code>len</code></td>
-          <td>Total duration of stream</td>
-          <td>Float (Seconds)</td>
+          <td>RO</td>
+          <td>float</td>
+          <td>Total track duration (seconds).</td>
         </tr>
         <tr>
           <td><code>db</code></td>
-          <td>Logarithmic energy level (dBFS)</td>
-          <td>Float (dB) | Range: -100 to 0</td>
+          <td>RO</td>
+          <td>float</td>
+          <td>RMS Logarithmic intensity (-100 to 0).</td>
+        </tr>
+        <tr>
+          <td><code>shuffle_state</code></td>
+          <td>RO</td>
+          <td>string</td>
+          <td><code>on</code> | <code>off</code></td>
         </tr>
       </tbody>
     </table>
+  </div>
 
-    <h2>Hardware Benchmarks (E-350 @ 1.6GHz)</h2>
-    <div class="performance-stats endpoint">
-      <ul>
-        <li>
-          <strong>CPU Overhead:</strong> ~19.5% (MP3 Decoding + Telemetry
-          Goroutine)
-        </li>
-        <li><strong>Memory:</strong> &lt; 15MB Resident Set Size</li>
-        <li><strong>IPC Latency:</strong> Near-zero (RAM-backed Nodes)</li>
-      </ul>
-    </div>
+  <div class="section">
+    <h2>3. Internal Logic</h2>
+    <h3>Automatic Refresh (<code>fsnotify</code>)</h3>
+    <p>The engine uses <code>inotify</code> to watch the <code>music/</code> directory. Adding or removing files sets
+      <code>needsRefresh = true</code>, triggering a playlist rebuild at the next track transition.
+    </p>
 
-    <footer
-      style="
-        margin-top: 60px;
-        padding: 20px;
-        border-top: 1px solid var(--code-bg);
-        font-size: 0.8rem;
-        opacity: 0.5;
-      "
-    >
-      Project: Vibe-Core | Hackathon: FOSSHack 2026 | License: Unlicense
-    </footer>
-  </body>
+    <h3>PCM Energy Calculation</h3>
+    <p>Calculated in the <code>onSamples</code> callback via <code>sampleSum += res * res</code>. Provides zero-latency
+      data for visualizers without extra CPU passes. It is not a spectrum due to high CPU usage with spectrum, this is
+      optimized for older
+      CPUs like the AMD E-350 this was made on.</p>
+  </div>
+
+  <footer style="text-align: center; opacity: 0.5; font-size: 0.8rem;">
+    Built for FOSSHack 2026 | Extremely Optimized | License: Unlicense
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
+</body>
+
 </html>

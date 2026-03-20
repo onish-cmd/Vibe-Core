@@ -57,7 +57,7 @@ func main() {
 func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "shuffle_state"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
@@ -65,9 +65,9 @@ func setupFiles() {
 			os.Remove(fullShmPath)
 			syscall.Mkfifo(fullShmPath, 0o666)
 		} else if node == "vol" {
-			if _, err := os.Stat(fullShmPath); os.IsNotExist(err) {
-				os.WriteFile(fullShmPath, []byte("50"), 0o644)
-			}
+			os.WriteFile(fullShmPath, []byte("50"), 0o644)
+		} else if node == "shuffle_state" {
+			os.WriteFile(fullShmPath, []byte("off"), 0o644)
 		} else {
 			os.WriteFile(fullShmPath, []byte(""), 0o644)
 		}
@@ -78,7 +78,7 @@ func setupFiles() {
 
 func cleanup() {
 	fmt.Println("\n[VIBE] Cleaning up UAPI...")
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "metadata"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "shuffle_state"}
 	for _, n := range nodes {
 		os.Remove(n)
 	}
