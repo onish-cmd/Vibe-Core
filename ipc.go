@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -106,6 +107,30 @@ func watchCtl() {
 				}
 			case "next":
 				skip <- true
+			case "shuffle":
+				shuffleMode = !shuffleMode
+				if shuffleMode {
+					r := rand.New(rand.NewSource(time.Now().UnixNano()))
+					r.Shuffle(len(playlist), func(i, j int) {
+						playlist[i], playlist[j] = playlist[j], playlist[i]
+					})
+					fmt.Println("Playlist shuffled.")
+					mu.Lock()
+					fmt.Println("--- Current Playlist ---")
+					for i, song := range playlist {
+						prefix := "  "
+						fmt.Printf("%s[%d] %s\n", prefix, i, song)
+					}
+					fmt.Println("-----------------------")
+					mu.Unlock()
+				} else {
+					needsRefresh = true
+				}
+				status := "off"
+				if shuffleMode {
+					status = "on"
+				}
+				os.WriteFile("/dev/shm/vibe/shuffle_state", []byte(status), 0o644)
 			case "exit":
 				cleanup()
 				os.Exit(0)

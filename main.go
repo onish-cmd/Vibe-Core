@@ -32,7 +32,7 @@ var (
 	sampleCount    int
 	muSum          sync.Mutex
 	needsRefresh   = true
-	specChan       = make(chan []float64, 5)
+	shuffleMode    = false
 )
 
 func main() {
@@ -78,7 +78,7 @@ func setupFiles() {
 
 func cleanup() {
 	fmt.Println("\n[VIBE] Cleaning up UAPI...")
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "spectrum"}
+	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "metadata"}
 	for _, n := range nodes {
 		os.Remove(n)
 	}

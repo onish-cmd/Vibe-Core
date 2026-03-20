@@ -48,16 +48,6 @@ func onSamples(pOutput, pInput []byte, frameCount uint32) {
 				currentElapsed += float64(frameCount) / sampleRate
 			}
 			mu.Unlock()
-
-			floatSamples := make([]float64, len(pOutput)/2)
-			for i := 0; i < len(pOutput); i += 2 {
-				s := int16(binary.LittleEndian.Uint16(pOutput[i : i+2]))
-				floatSamples[i/2] = float64(s)
-			}
-			select {
-			case specChan <- floatSamples:
-			default:
-			}
 		default:
 			for i := readTotal; i < outputLen; i++ {
 				pOutput[i] = 0
