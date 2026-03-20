@@ -131,6 +131,14 @@ func watchCtl() {
 					status = "on"
 				}
 				os.WriteFile("/dev/shm/vibe/shuffle_state", []byte(status), 0o644)
+			case "prev":
+				mu.Lock()
+				index = (index - 2 + len(playlist)) % len(playlist)
+				mu.Unlock()
+				select {
+				case skip <- true:
+				default:
+				}
 			case "exit":
 				cleanup()
 				os.Exit(0)
@@ -165,6 +173,11 @@ func watchSeek() {
 
 			// Convert seconds to byte position (SampleRate * 4 bytes per frame)
 			bytePos := int64(sec * sampleRate * 4)
+			if bytePos > +decoder.Length() {
+				fmt.Println("Seek out of bounds.")
+				mu.Unlock()
+				return
+			}
 			if bytePos >= 0 && bytePos <= decoder.Length() {
 				_, err := decoder.Seek(bytePos, 0) // 0 = io.SeekStart
 				if err == nil {

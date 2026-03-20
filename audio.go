@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
+	"time"
 
 	"github.com/gen2brain/malgo"
 	"github.com/hajimehoshi/go-mp3"
@@ -80,6 +80,8 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 func playNext(ctx *malgo.AllocatedContext) {
 	mu.Lock()
 	if needsRefresh {
+		fmt.Println("Refresh needed, reset index!")
+		index = 0
 		playlist = nil
 		files, _ := os.ReadDir(musicDir)
 		for _, f := range files {
@@ -100,7 +102,9 @@ func playNext(ctx *malgo.AllocatedContext) {
 	// Safety check for empty playlists
 	if len(playlist) == 0 {
 		mu.Unlock()
-		return
+		fmt.Println("No MP3 found, quit!")
+		cleanup()
+		os.Exit(127)
 	}
 
 	filePath := playlist[index]
@@ -110,7 +114,16 @@ func playNext(ctx *malgo.AllocatedContext) {
 		mu.Unlock()
 		return
 	}
-	d, _ := mp3.NewDecoder(f)
+	d, err := mp3.NewDecoder(f)
+	if err != nil || d == nil {
+		fmt.Printf("[VIBE] Error: %s is not a valid MP3\n", filePath)
+		f.Close()
+		mu.Lock()
+		playNowActive = false
+		index = (index + 1) % len(playlist)
+		mu.Unlock()
+		return
+	}
 	decoder = d
 	sRate := uint32(d.SampleRate())
 	sampleRate = float64(sRate)
@@ -139,10 +152,14 @@ func playNext(ctx *malgo.AllocatedContext) {
 		case <-skip:
 			goto stop
 		default:
-			if len(audioBuffer) == 0 {
+			mu.Lock()
+			pos, _ := decoder.Seek(0, 1)
+			if len(audioBuffer) == 0 && pos >= decoder.Length() {
+				mu.Unlock()
 				goto stop
 			}
-			syscall.Select(0, nil, nil, nil, &syscall.Timeval{Usec: 100000})
+			mu.Unlock()
+			time.Sleep(100 * time.Millisecond)
 		}
 	}
 
@@ -152,7 +169,7 @@ stop:
 	f.Close()
 
 	mu.Lock()
-	if playNowActive && musicDir != savedMusicDir {
+	if playNowActive {
 		musicDir = savedMusicDir
 		index = savedIndex
 		playNowActive = false
