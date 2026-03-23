@@ -75,18 +75,22 @@ func startTelemetry() {
 func watchVolume() {
 	for {
 		data, _ := os.ReadFile("vol")
+		mu.Lock()
 		if v, err := strconv.Atoi(strings.TrimSpace(string(data))); err == nil {
-			mu.Lock()
 			volume = float32(v) / 100.0
-			mu.Unlock()
 		}
+		mu.Unlock()
 		time.Sleep(500 * time.Millisecond)
 	}
 }
 
 func watchCtl() {
 	for {
-		f, _ := os.OpenFile("ctl", os.O_RDONLY, 0)
+		f, err := os.OpenFile("ctl", os.O_RDONLY, 0)
+		if err != nil {
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
 		scanner := bufio.NewScanner(f)
 		for scanner.Scan() {
 			cmd := strings.TrimSpace(scanner.Text())
@@ -110,21 +114,24 @@ func watchCtl() {
 			case "shuffle":
 				shuffleMode = !shuffleMode
 				if shuffleMode {
+					mu.Lock()
 					r := rand.New(rand.NewSource(time.Now().UnixNano()))
 					r.Shuffle(len(playlist), func(i, j int) {
 						playlist[i], playlist[j] = playlist[j], playlist[i]
 					})
-					fmt.Println("Playlist shuffled.")
-					mu.Lock()
-					fmt.Println("--- Current Playlist ---")
-					for i, song := range playlist {
-						prefix := "  "
-						fmt.Printf("%s[%d] %s\n", prefix, i, song)
-					}
-					fmt.Println("-----------------------")
+					savePlaylist(playlist)
 					mu.Unlock()
 				} else {
-					needsRefresh = true
+					playlist = make([]string, len(masterPlaylist))
+					copy(playlist, masterPlaylist)
+
+					for i, name := range playlist {
+						if name == currentSong {
+							index = i
+							break
+						}
+					}
+					savePlaylist(playlist)
 				}
 				status := "off"
 				if shuffleMode {

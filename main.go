@@ -33,6 +33,8 @@ var (
 	muSum          sync.Mutex
 	needsRefresh   = true
 	shuffleMode    = false
+	nodes          []string
+	masterPlaylist []string
 )
 
 func main() {
@@ -57,7 +59,7 @@ func main() {
 func setupFiles() {
 	shmPath := "/dev/shm/vibe"
 	os.MkdirAll(shmPath, 0o777)
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "shuffle_state"}
+	nodes = []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "shuffle_state", "playlist"}
 
 	for _, node := range nodes {
 		fullShmPath := filepath.Join(shmPath, node)
@@ -78,7 +80,6 @@ func setupFiles() {
 
 func cleanup() {
 	fmt.Println("\n[VIBE] Cleaning up UAPI...")
-	nodes := []string{"ctl", "vol", "state", "now_playing", "head", "play_now", "seek", "len", "db", "shuffle_state"}
 	for _, n := range nodes {
 		os.Remove(n)
 	}

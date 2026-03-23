@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -45,7 +46,7 @@ func onSamples(pOutput, pInput []byte, frameCount uint32) {
 			readTotal += copyLen
 			mu.Lock()
 			if currentState == "playing" {
-				currentElapsed += float64(frameCount) / sampleRate
+				currentElapsed += float64(copyLen) / (sampleRate * 4)
 			}
 			mu.Unlock()
 		default:
@@ -77,11 +78,24 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 	}
 }
 
+func savePlaylist(playlist []string) error {
+	buf := new(bytes.Buffer)
+	for _, s := range playlist {
+		buf.WriteString(s)
+		buf.WriteString("\n")
+	}
+	return os.WriteFile("/dev/shm/vibe/playlist", buf.Bytes(), 0o644)
+}
+
 func playNext(ctx *malgo.AllocatedContext) {
 	mu.Lock()
 	if needsRefresh {
-		fmt.Println("Refresh needed, reset index!")
-		index = 0
+		if len(playlist) == 1 && savedMusicDir != "" {
+			playNowActive = true
+		}
+		if !playNowActive {
+			index = 0
+		}
 		playlist = nil
 		files, _ := os.ReadDir(musicDir)
 		for _, f := range files {
@@ -93,9 +107,9 @@ func playNext(ctx *malgo.AllocatedContext) {
 			mu.Unlock()
 			return
 		}
-		if len(playlist) == 1 && savedMusicDir != "" {
-			playNowActive = true
-		}
+		masterPlaylist = make([]string, len(playlist))
+		copy(masterPlaylist, playlist)
+		savePlaylist(playlist)
 		needsRefresh = false
 	}
 
