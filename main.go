@@ -35,6 +35,7 @@ var (
 	shuffleMode    = false
 	nodes          []string
 	masterPlaylist []string
+	lastSample     int16 = 0
 )
 
 func main() {

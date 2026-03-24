@@ -14,6 +14,19 @@ import (
 	"github.com/hajimehoshi/go-mp3"
 )
 
+func renderDecay(buffer []byte, startSample int16) {
+	samples := len(buffer) / 2
+	if samples == 0 {
+		return
+	}
+
+	for i := 0; i < samples; i++ {
+		// linear ramp to zero
+		decayed := int16(float32(startSample) * (1.0 - float32(i)/float32(samples)))
+		binary.LittleEndian.PutUint16(buffer[i*2:], uint16(decayed))
+	}
+}
+
 func onSamples(pOutput, pInput []byte, frameCount uint32) {
 	outputLen := len(pOutput)
 	readTotal := 0
@@ -23,36 +36,53 @@ func onSamples(pOutput, pInput []byte, frameCount uint32) {
 
 	for readTotal < outputLen {
 		select {
-		case chunk := <-audioBuffer:
+		case chunk, ok := <-audioBuffer:
+			if !ok {
+				renderDecay(pOutput[readTotal:], lastSample)
+				lastSample = 0
+				return
+			}
 			copyLen := len(chunk)
 			if readTotal+copyLen > outputLen {
 				copyLen = outputLen - readTotal
 			}
 
+			var chunkSum float64 // Local accumulator
+			var lastRes int32
+
 			for j := 0; j < copyLen; j += 2 {
 				sample := int16(binary.LittleEndian.Uint16(chunk[j : j+2]))
 				res := (int32(sample) * vFixed) >> 8
+
+				// Fast clipping
 				if res > 32767 {
 					res = 32767
 				} else if res < -32768 {
 					res = -32768
 				}
+
 				binary.LittleEndian.PutUint16(pOutput[readTotal+j:], uint16(int16(res)))
-				muSum.Lock()
-				sampleSum += float64(res) * float64(res)
-				sampleCount++
-				muSum.Unlock()
+				chunkSum += float64(res) * float64(res)
+				lastRes = res
 			}
+
+			muSum.Lock()
+			sampleSum += chunkSum
+			sampleCount += copyLen / 2
+			muSum.Unlock()
+
 			readTotal += copyLen
+
 			mu.Lock()
+			lastSample = int16(lastRes)
 			if currentState == "playing" {
 				currentElapsed += float64(copyLen) / (sampleRate * 4)
 			}
 			mu.Unlock()
+
 		default:
-			for i := readTotal; i < outputLen; i++ {
-				pOutput[i] = 0
-			}
+			renderDecay(pOutput[readTotal:], lastSample)
+			lastSample = 0
 			return
 		}
 	}
@@ -152,7 +182,7 @@ func playNext(ctx *malgo.AllocatedContext) {
 
 	deviceConfig := malgo.DefaultDeviceConfig(malgo.Playback)
 	deviceConfig.Playback.Format, deviceConfig.Playback.Channels = malgo.FormatS16, 2
-	deviceConfig.SampleRate, deviceConfig.Alsa.NoMMap, deviceConfig.PeriodSizeInFrames = sRate, 1, 1024
+	deviceConfig.SampleRate, deviceConfig.Alsa.NoMMap, deviceConfig.PeriodSizeInFrames = sRate, 1, 16384
 
 	device, _ = malgo.InitDevice(ctx.Context, deviceConfig, malgo.DeviceCallbacks{Data: onSamples})
 	device.Start()

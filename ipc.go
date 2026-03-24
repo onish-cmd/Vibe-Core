@@ -61,6 +61,7 @@ func startTelemetry() {
 				db = 20 * math.Log10(rms/32768.0)
 			}
 			sampleSum, sampleCount = 0, 0
+			os.WriteFile("/dev/shm/vibe/db", []byte(fmt.Sprintf("%.1f", db)), 0o644)
 		}
 		muSum.Unlock()
 
@@ -68,7 +69,6 @@ func startTelemetry() {
 		os.WriteFile("/dev/shm/vibe/len", []byte(fmt.Sprintf("%.2f", total)), 0o644)
 		os.WriteFile("/dev/shm/vibe/state", []byte(status), 0o644)
 		os.WriteFile("/dev/shm/vibe/now_playing", []byte(song), 0o644)
-		os.WriteFile("/dev/shm/vibe/db", []byte(fmt.Sprintf("%.1f", db)), 0o644)
 	}
 }
 

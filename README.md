@@ -5,7 +5,7 @@ An ultra-lightweight, sample-accurate audio engine written in Go. Vibe-Core foll
 ## Features
 
 - **Zero-Bloat IPC:** Uses FIFOs and shared memory for near-zero latency control.
-- **Resource Efficient:** Designed to run on low-end hardware (tested on AMD E-350 with 2% CPU).
+- **Resource Efficient:** Designed to run on low-end hardware (tested on AMD E-350 with 19% CPU).
 - **Direct Injection:** Support for immediate file playback without playlist corruption.
 - **Sample-Accurate Telemetry:** High-precision playback tracking via `/dev/shm/vibe/head`.
 - **Digital Boost:** Software-level gain up to 200%.

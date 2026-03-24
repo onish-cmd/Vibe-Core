@@ -104,7 +104,8 @@
         echo "resume" > ctl # Resume playback
         echo "next" > ctl # Skip to next track
         echo "shuffle" > ctl # Toggle Fisher-Yates (Writes to shuffle_state)
-        echo "exit" > ctl # Cleanup and terminate engine</code></pre>
+        echo "exit" > ctl # Cleanup and terminate engine
+        echo "prev" > ctl # Go to previous track </code></pre>
 
     <h3>Seek Control (<code>seek</code>)</h3>
     <p>Instantly drains the audio buffer and repositions the MP3 decoder.</p>
@@ -169,6 +170,12 @@
           <td>RO</td>
           <td>string</td>
           <td><code>on</code> | <code>off</code></td>
+        </tr>
+        <tr>
+          <td><code>playlist</code></td>
+          <td>RO</td>
+          <td>string (each song in playlist is separated by newline)</td>
+          <td>Current playlist</td>
         </tr>
       </tbody>
     </table>
