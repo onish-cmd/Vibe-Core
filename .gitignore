@@ -1,3 +1,6 @@
 # Remove copyrighted testing content.
 music/test.mp3
 test.mp3
+
+# Remove binary
+vibe-core
