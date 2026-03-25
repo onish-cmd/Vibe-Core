@@ -94,15 +94,28 @@ func decodeLoop(d *mp3.Decoder, stop chan bool) {
 		case <-stop:
 			return
 		default:
-			buf := make([]byte, 4096)
-			mu.Lock()
-			n, err := io.ReadFull(d, buf)
-			mu.Unlock()
-			if n > 0 {
-				audioBuffer <- buf[:n]
+			buffFill := len(audioBuffer)
+
+			if buffFill > 500 {
+				time.Sleep(200 * time.Millisecond)
+			} else if buffFill > 200 {
+				time.Sleep(40 * time.Millisecond)
+			} else if buffFill > 100 {
+				time.Sleep(10 * time.Millisecond)
+			} else {
 			}
-			if err != nil {
-				return
+			for i := 0; i < 10; i++ {
+				buf := make([]byte, 4096)
+				mu.Lock()
+				n, err := io.ReadFull(d, buf)
+				mu.Unlock()
+
+				if n > 0 {
+					audioBuffer <- buf[:n]
+				}
+				if err != nil {
+					return
+				}
 			}
 		}
 	}
@@ -195,7 +208,7 @@ func playNext(ctx *malgo.AllocatedContext) {
 		select {
 		case <-skip:
 			goto stop
-		default:
+		case <-time.After(500 * time.Millisecond):
 			mu.Lock()
 			pos, _ := decoder.Seek(0, 1)
 			if len(audioBuffer) == 0 && pos >= decoder.Length() {

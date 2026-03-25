@@ -43,7 +43,7 @@ func watchPlayNow() {
 }
 
 func startTelemetry() {
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(500 * time.Millisecond)
 	for range ticker.C {
 		mu.Lock()
 		elapsed, status, song := currentElapsed, currentState, currentSong

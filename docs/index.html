@@ -20,7 +20,7 @@
     }
 
     body {
-      font-family: "Inter", system-ui, sans-serif;
+      font-family: "Inter", "Segoe UI", system-ui, sans-serif;
       background-color: var(--bg);
       color: var(--fg);
       line-height: 1.6;
@@ -50,7 +50,7 @@
       padding: 2px 6px;
       border-radius: 4px;
       color: var(--purple);
-      font-family: monospace;
+      font-family: 'JetBrains Mono', monospace;
     }
 
     pre[class*="language-"] {
@@ -74,51 +74,67 @@
 
     th {
       color: var(--accent);
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       text-transform: uppercase;
+      letter-spacing: 1px;
     }
 
     .badge {
-      background: var(--accent);
-      color: var(--bg);
-      padding: 3px 10px;
-      border-radius: 12px;
-      font-size: 0.8rem;
+      background: #7aa2f7;
+      color: #1a1b26;
+      padding: 3px 12px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      font-weight: 800;
+    }
+
+    .perf-tag {
+      color: #9ece6a;
       font-weight: bold;
+      font-size: 0.9rem;
     }
   </style>
 </head>
 
 <body>
-  <h1>Vibe-Core <span class="badge">v1.4.3</span></h1>
-  <p>A headless Linux audio engine using <strong>Memory-Mapped IPC</strong>. All nodes reside in
-    <code>/dev/shm/vibe/</code>.
+  <h1>Vibe-Core <span class="badge">v1.5.0</span></h1>
+  <p>A headless Linux audio engine using <strong>Shared Memory IPC</strong>. All nodes reside in
+    <code>/dev/shm/vibe/</code> for zero-copy efficiency.
   </p>
 
   <div class="section">
-    <h2>1. Control Interface (FIFOs)</h2>
-    <p>These nodes use <code>mkfifo</code>. Writing to them triggers immediate engine reactions.</p>
-
-    <h3>Command Pipe (<code>ctl</code>)</h3>
-    <pre><code class="language-bash">echo "pause" > ctl # Suspend playback
-        echo "resume" > ctl # Resume playback
-        echo "next" > ctl # Skip to next track
-        echo "shuffle" > ctl # Toggle Fisher-Yates (Writes to shuffle_state)
-        echo "exit" > ctl # Cleanup and terminate engine
-        echo "prev" > ctl # Go to previous track </code></pre>
-
-    <h3>Seek Control (<code>seek</code>)</h3>
-    <p>Instantly drains the audio buffer and repositions the MP3 decoder.</p>
-    <pre><code class="language-bash">echo "45.5" > seek # Jump to 45.5 seconds</code></pre>
-
-    <h3>Priority Injection (<code>play_now</code>)</h3>
-    <p>Interrupts current playlist, saves the <code>index</code>, and plays a specific file. Returns to original state
-      after.</p>
-    <pre><code class="language-bash">echo "/home/onish/music/alert.mp3" > play_now</code></pre>
+    <h2>1. The Engine</h2>
+    <p>Optimized for legacy hardware (AMD E-350 / 1.6GHz). Vibe-Core prioritizes <strong>thermal headroom</strong> over
+      high-frequency UI updates.</p>
+    <ul>
+      <li><span class="perf-tag">Dynamic Batching:</span> Decodes 10 chunks (~200ms) per cycle to reduce context
+        switching.</li>
+      <li><span class="perf-tag">Adaptive Sleep:</span> Logic adjusts based on <code>len(audioBuffer)</code> (Target:
+        512 chunks).</li>
+      <li><span class="perf-tag">Telemetry Sync:</span> 500ms sync window (Reduces I/O overhead on older storage
+        controllers).</li>
+    </ul>
   </div>
 
   <div class="section">
-    <h2>2. Stateful & Telemetry Nodes</h2>
+    <h2>2. Control Interface (FIFOs)</h2>
+    <p>Write-only nodes that trigger immediate engine actions via <code>mkfifo</code>.</p>
+
+    <h3>Command Pipe (<code>ctl</code>)</h3>
+    <pre><code class="language-bash">echo "pause" > ctl # Suspend audio thread
+        echo "resume" > ctl # Wake audio thread
+        echo "next" > ctl # Advance playlist index
+        echo "prev" > ctl # Decrement playlist index
+        echo "shuffle" > ctl # Fisher-Yates shuffle toggle
+        echo "exit" > ctl # Graceful cleanup of /dev/shm nodes</code></pre>
+
+    <h3>Extended Controls</h3>
+    <pre><code class="language-bash">echo "45.5" > seek # Jump to timestamp
+        echo "/path/to/music.mp3" > play_now # Priority interrupt play</code></pre>
+  </div>
+
+  <div class="section">
+    <h2>3. Stateful & Telemetry Nodes (Shared Memory)</h2>
     <table>
       <thead>
         <tr>
@@ -132,8 +148,8 @@
         <tr>
           <td><code>vol</code></td>
           <td>R/W</td>
-          <td>0-100</td>
-          <td>Linear gain. Initialized at 50.</td>
+          <td>0-200</td>
+          <td>Linear gain. <b>100-200: Boost Mode.</b> Initialized at 50.</td>
         </tr>
         <tr>
           <td><code>state</code></td>
@@ -145,25 +161,25 @@
           <td><code>now_playing</code></td>
           <td>RO</td>
           <td>string</td>
-          <td>Filename of active MP3.</td>
+          <td>Filename of the active track.</td>
         </tr>
         <tr>
           <td><code>head</code></td>
           <td>RO</td>
           <td>float</td>
-          <td>Current elapsed time (seconds).</td>
+          <td>Elapsed time (seconds). Updated @ 500ms.</td>
         </tr>
         <tr>
           <td><code>len</code></td>
           <td>RO</td>
           <td>float</td>
-          <td>Total track duration (seconds).</td>
+          <td>Total duration of the active file.</td>
         </tr>
         <tr>
           <td><code>db</code></td>
           <td>RO</td>
           <td>float</td>
-          <td>RMS Logarithmic intensity (-100 to 0).</td>
+          <td>RMS Intensity (-100 to 0). Used for meters.</td>
         </tr>
         <tr>
           <td><code>shuffle_state</code></td>
@@ -174,29 +190,23 @@
         <tr>
           <td><code>playlist</code></td>
           <td>RO</td>
-          <td>string (each song in playlist is separated by newline)</td>
-          <td>Current playlist</td>
+          <td>string</td>
+          <td>Newline-separated queue of paths.</td>
         </tr>
       </tbody>
     </table>
   </div>
 
   <div class="section">
-    <h2>3. Internal Logic</h2>
-    <h3>Automatic Refresh (<code>fsnotify</code>)</h3>
-    <p>The engine uses <code>inotify</code> to watch the <code>music/</code> directory. Adding or removing files sets
-      <code>needsRefresh = true</code>, triggering a playlist rebuild at the next track transition.
-    </p>
-
-    <h3>PCM Energy Calculation</h3>
-    <p>Calculated in the <code>onSamples</code> callback via <code>sampleSum += res * res</code>. Provides zero-latency
-      data for visualizers without extra CPU passes. It is not a spectrum due to high CPU usage with spectrum, this is
-      optimized for older
-      CPUs like the AMD E-350 this was made on.</p>
+    <h2>4. Low-Level Implementation</h2>
+    <h3>Entropy-Based Memory Triage</h3>
+    <p>Internal <code>sampleSum</code> calculations occur in the <code>onSamples</code> callback. By calculating RMS
+      values during the decode pass, Vibe-Core avoids a second pass over the data, saving valuable CPU cycles on
+      Bobcat-era cores.</p>
   </div>
 
-  <footer style="text-align: center; opacity: 0.5; font-size: 0.8rem;">
-    Built for FOSSHack 2026 | Extremely Optimized | License: Unlicense
+  <footer style="text-align: center; opacity: 0.6; font-size: 0.8rem; margin-top: 50px;">
+    Built for FOSSHack 2026 | Optimized | License: The Unlicense
   </footer>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>

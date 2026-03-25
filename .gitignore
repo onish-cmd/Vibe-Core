@@ -4,3 +4,6 @@ test.mp3
 
 # Remove binary
 vibe-core
+
+# Remove benchmarking software
+get_cpu
