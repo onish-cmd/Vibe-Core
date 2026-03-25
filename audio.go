@@ -175,7 +175,6 @@ func playNext(ctx *malgo.AllocatedContext) {
 	if err != nil || d == nil {
 		fmt.Printf("[VIBE] Error: %s is not a valid MP3\n", filePath)
 		f.Close()
-		mu.Lock()
 		playNowActive = false
 		index = (index + 1) % len(playlist)
 		mu.Unlock()
